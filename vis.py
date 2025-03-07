@@ -3,13 +3,25 @@ Scottish Archaeological Finds Analysis and Visualization Tool
 
 This script analyzes and visualizes archaeological finds in Scotland using
 both heatmaps and scatter plots, with focus on different historical eras.
+
+Data Sources
+------------
+1. National Record of the Historic Environment (NRHE) Areas
+- Contains archaeological finds and sites in Scotland
+- Shapefile with point data for each find
+- See more at: https://www.historicenvironment.scot/archives-and-research/archaeology-and-heritage-collections/
+2. Scottish Parliament Regions (1999-2011)
+- Shapefile with boundaries of Scottish Parliament regions
+- Used for filtering cities within Scotland
+- See more at: https://www.nrscotland.gov.uk/statistics-and-data/geography/our-products/scottish-parliamentary-constituencies
+3. OpenStreetMap (OSM) data
+- Used for fetching Scottish cities and population data
+- See more at: https://www.openstreetmap.org/
+
 """
 
-import geopandas as gpd
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as path_effects
-import numpy as np
-import overpy
 import pandas as pd
 from scipy.stats import gaussian_kde
 from scipy.spatial import KDTree
@@ -17,21 +29,21 @@ from shapely.geometry import Point
 from shapely.vectorized import contains
 from tqdm import tqdm
 
+from utils import *
+
 # Constants
 SCOTLAND_BBOX = (-8.8, -0.4, 54.5, 61)  # bounding box for Scotland (south, west, north, east)
 DISTANCE_THRESHOLD_CITY = 10000  # meters
 DISTANCE_THRESHOLD_REGION = 20000  # meters
-DEFAULT_CRS = 'EPSG:27700'  # British National Grid
-WGS84_CRS = 'EPSG:4326'  # WGS84 standard
 
 # Historical eras with date ranges
 ERAS_DATES = {
     'PREHISTORIC': '10000 BC - 4000 BC',
     'NEOLITHIC': '4000 BC - 2000 BC',
-#     'BRONZE AGE': '2000 BC - 800 BC',
-#     'IRON AGE': '800 BC - 43 AD',
-#     'ROMAN': '43 AD - 410 AD',
-#     'EARLY MEDIEVAL': '410 AD - 1066 AD'
+    'BRONZE AGE': '2000 BC - 800 BC',
+    'IRON AGE': '800 BC - 43 AD',
+    'ROMAN': '43 AD - 410 AD',
+    'EARLY MEDIEVAL': '410 AD - 1066 AD'
 }
 
 # Key locations
@@ -40,41 +52,43 @@ TOWNS = {
     'Traprian\nLaw': (-2.6667, 55.9667),
     'Dumfries': (-3.60667, 55.07083),
     'Perthshire': (-3.72971, 56.704361),
-#     'Orkney': (-3.225, 58.9847),
+    'Orkney': (-3.225, 58.9847),
     'Aberdeenshire': (-2.7194, 57.1621)
 }
 
-
-def read_shapefile_and_reproject(path, target_crs=WGS84_CRS):
-    """
-    Read a shapefile and ensure it's in the target coordinate reference system.
+CATEGORIES_FUNCTIONS_MAP = {
+    'FORT': 'PROTECTIVE',
+    'PALISADED ENCLOSURE': 'PROTECTIVE',
+    'PALISADED SETTLEMENT': 'PROTECTIVE',
+    'EARTHWORK': 'PROTECTIVE',
     
-    Args:
-        path: Path to the shapefile
-        target_crs: Target coordinate reference system (default: WGS84)
-        
-    Returns:
-        GeoDataFrame in the target CRS
-    """
-    try:
-        gdf = gpd.read_file(path)
-        if gdf.crs is None:
-            gdf.set_crs(DEFAULT_CRS, inplace=True)
-        if gdf.crs.to_string() != target_crs:
-            gdf = gdf.to_crs(target_crs)
-        return gdf
-    except Exception as e:
-        print(f"Error reading shapefile {path}: {e}")
-        raise
-
-
-def prepare_implot(ax, spines_off=False):
-    """Configure axis for map plotting."""
-    ax.set_xticks([])
-    ax.set_yticks([])
-    if spines_off:
-        for spine in ax.spines.values():
-            spine.set_visible(False)
+    'HUT CIRCLE': 'DOMESTIC',
+    'ROUNDHOUSE': 'DOMESTIC',
+    'ENCLOSED SETTLEMENT': 'DOMESTIC',
+    'UNENCLOSED PLATFORM SETTLEMENT': 'DOMESTIC',
+    'PLATFORM SETTLEMENT': 'DOMESTIC',
+    'SOUTERRAIN': 'DOMESTIC',
+    'CRANNOG': 'DOMESTIC',
+            
+    'LONG CIST': 'RITUAL',
+    'STANDING STONE': 'RITUAL',
+    'BURIAL CAIRN': 'RITUAL',
+    'CUP MARKED STONE': 'RITUAL',
+    'CAIRN': 'RITUAL',
+    'CAIRNFIELD': 'RITUAL',
+            
+    'ENCLOSURE': 'AGRICULTURAL',
+    'RING DITCH': 'AGRICULTURAL',
+    'PIT ALIGNMENT': 'AGRICULTURAL',
+    'CROPMARK': 'AGRICULTURAL',
+    'FIELD BOUNDARY': 'AGRICULTURAL',
+    'FIELD SYSTEM': 'AGRICULTURAL',
+    'BANK': 'AGRICULTURAL',
+    'RING DITCH HOUSE': 'AGRICULTURAL',
+            
+    'POST HOLE': 'OTHER',
+    'UNIDENTIFIED FLINT': 'OTHER'
+}
 
 
 def plot_edinburgh_cities(edinburgh_coords, towns, ax, padding=0.05):
@@ -107,11 +121,6 @@ def plot_edinburgh_cities(edinburgh_coords, towns, ax, padding=0.05):
         )
         text.set_path_effects([path_effects.Stroke(linewidth=1, foreground='white'), path_effects.Normal()])
         ax.scatter(coord[0] + padding, coord[1] - padding, s=4, color='black')
-
-
-def euclidean_distance(x1, y1, x2, y2):
-    """Calculate Euclidean distance between two points."""
-    return ((x1-x2)**2 + (y1-y2)**2)**0.5
 
 
 def table_cities_finds(gdf, eras_dates, cities):
@@ -191,42 +200,8 @@ def print_city_finds_summary(gdf, city_coords, city_name, eras_dates):
         hatch_patterns = ["-", "/", "o"] * 10
         colors = ['lightgray', 'white', 'black', 'gray'] * 10
         
-        categories_function_map = {
-            'FORT': 'PROTECTIVE',
-            'PALISADED ENCLOSURE': 'PROTECTIVE',
-            'PALISADED SETTLEMENT': 'PROTECTIVE',
-            'EARTHWORK': 'PROTECTIVE',
-            
-            'HUT CIRCLE': 'DOMESTIC',
-            'ROUNDHOUSE': 'DOMESTIC',
-            'ENCLOSED SETTLEMENT': 'DOMESTIC',
-            'UNENCLOSED PLATFORM SETTLEMENT': 'DOMESTIC',
-            'PLATFORM SETTLEMENT': 'DOMESTIC',
-            'SOUTERRAIN': 'DOMESTIC',
-            'CRANNOG': 'DOMESTIC',
-            
-            'LONG CIST': 'RITUAL',
-            'STANDING STONE': 'RITUAL',
-            'BURIAL CAIRN': 'RITUAL',
-            'CUP MARKED STONE': 'RITUAL',
-            'CAIRN': 'RITUAL',
-            'CAIRNFIELD': 'RITUAL',
-            
-            'ENCLOSURE': 'AGRICULTURAL',
-            'RING DITCH': 'AGRICULTURAL',
-            'PIT ALIGNMENT': 'AGRICULTURAL',
-            'CROPMARK': 'AGRICULTURAL',
-            'FIELD BOUNDARY': 'AGRICULTURAL',
-            'FIELD SYSTEM': 'AGRICULTURAL',
-            'BANK': 'AGRICULTURAL',
-            'RING DITCH HOUSE': 'AGRICULTURAL',
-            
-            'POST HOLE': 'OTHER',
-            'UNIDENTIFIED FLINT': 'OTHER'
-        }
-        
-        functions = [categories_function_map.get(find, 'OTHER') for find in find_counts_sorted.keys()]
-        functions_unique = sorted(list(set(categories_function_map.values())))
+        functions = [CATEGORIES_FUNCTIONS_MAP.get(find, 'OTHER') for find in find_counts_sorted.keys()]
+        functions_unique = sorted(list(set(CATEGORIES_FUNCTIONS_MAP.values())))
         
         # Create figure with two subplots
         fig, axs = plt.subplots(1, 2, figsize=(10, 5), dpi=300, gridspec_kw={'width_ratios': [9, 1]})
@@ -256,7 +231,7 @@ def print_city_finds_summary(gdf, city_coords, city_name, eras_dates):
         axs[0].legend(by_label.values(), by_label.keys())
 
         # Plot stacked bar plot with proportions of functions (sum of counts for each function)
-        function_counts = {function: sum([find_counts[find] for find in find_counts_sorted.keys() if categories_function_map.get(find, 'OTHER') == function]) for function in functions_unique}
+        function_counts = {function: sum([find_counts[find] for find in find_counts_sorted.keys() if CATEGORIES_FUNCTIONS_MAP.get(find, 'OTHER') == function]) for function in functions_unique}
         for i, function in enumerate(functions_unique):
             axs[1].bar(
                 'Function\nProfile', 
@@ -347,69 +322,6 @@ def plot_roman_roads_and_forts(points):
     
     plt.tight_layout()
     plt.savefig('roman_roads_forts.png')
-    
-    
-
-def ordinal(n): 
-    """Convert integer to ordinal string (1st, 2nd, 3rd, etc.)."""
-    if 11 <= (n % 100) <= 13:
-        suffix = 'th'
-    else:
-        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
-    return f'{n}{suffix}'
-
-
-def fetch_scottish_cities(min_population=1000, scotland_boundary=None):
-    """
-    Fetch Scottish cities from OpenStreetMap with population filtering.
-    
-    Args:
-        min_population: Minimum population to include
-        scotland_boundary: Optional Scotland boundary for filtering
-        
-    Returns:
-        Dictionary mapping city names to (lon, lat) coordinates
-    """
-    api = overpy.Overpass()
-    bbox = SCOTLAND_BBOX
-    
-    # Query for cities with population data
-    query = f"""
-    [out:json];
-    (
-      node["place"~"city|town|village|hamlet"]["population"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
-    );
-    out center;
-    """
-    
-    try:
-        result = api.query(query)
-        cities = {}
-        
-        # Process results
-        for node in result.nodes:
-            name = node.tags.get('name')
-            population = node.tags.get('population')
-            if name and population and int(population) >= min_population:
-                cities[name] = (float(node.lon), float(node.lat))
-        
-        # Filter by Scotland boundary if provided
-        if scotland_boundary is not None:
-            scotland_union = scotland_boundary.union_all()
-            cities_to_delete = []
-            
-            for city, coord in tqdm(cities.items(), desc='Filtering cities', ncols=150):
-                if not contains(scotland_union, coord[0], coord[1]):
-                    cities_to_delete.append(city)
-                    
-            for city in cities_to_delete:
-                del cities[city]
-        
-        return cities
-    
-    except Exception as e:
-        print(f"Error fetching cities: {e}")
-        return {}
 
 
 def scottish_cities_scatterplot(cities, bg_image, extent, labels=False):
@@ -488,7 +400,7 @@ def create_era_visualizations(points, scotland_boundary, eras_dates):
     n_eras = len(eras_dates)
     
     # Create figure objects
-    fig_heat, axs_heat = plt.subplots(1, n_eras, dpi=300, figsize=(4*n_eras, 3))
+    fig_heat, axs_heat = plt.subplots(1, n_eras, dpi=300, figsize=(3*n_eras, 5))
     fig_scatter, axs_scatter = plt.subplots(1, n_eras, dpi=300, figsize=(3*n_eras, 5))
     
     # Process each era
@@ -526,11 +438,11 @@ def create_era_visualizations(points, scotland_boundary, eras_dates):
         alpha_mask = norm(zi) ** 2 # Map values to alpha range 0-1
         masked_zi = np.ma.array(zi, mask=np.isnan(zi))
         ax_heat.imshow(np.flipud(masked_zi.T), extent=extent, cmap='magma', alpha=np.flipud(alpha_mask.T), aspect='auto')
-        ax_heat.set_ylim(55, 58)
+        # ax_heat.set_ylim(55, 58)
         
         plot_edinburgh_cities(EDINBURGH_COORDS, TOWNS, ax_heat, padding=0.05)
         prepare_implot(ax_heat, spines_off=False)
-        # ax_heat.set_title(title, fontsize=14)
+        ax_heat.set_title(title, fontsize=14)
 
         # Create scatter plot
         ax_scatter.imshow(bg_image, extent=extent, aspect='auto')
@@ -541,10 +453,10 @@ def create_era_visualizations(points, scotland_boundary, eras_dates):
     
     # Save figures
     fig_heat.tight_layout()
-    fig_heat.savefig('kde_heatmap_meso_neo.png')
+    fig_heat.savefig('kde_heatmap.png')
     
     fig_scatter.tight_layout()
-    fig_scatter.savefig('scatter_meso_neo.png')
+    fig_scatter.savefig('scatter.png')
 
 
 def main():
