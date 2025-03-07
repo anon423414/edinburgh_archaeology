@@ -1,4 +1,4 @@
-# Anonymized support code for Midpoint Essay for HIST08036: History of Edinburgh
+# Anonymized Support Code for HIST08036: History of Edinburgh Midpoint Essay
 
 ## Visualizations (included in paper)
 
