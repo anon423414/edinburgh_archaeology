@@ -1,4 +1,4 @@
-![image](https://github.com/user-attachments/assets/45ea595f-069d-4d24-a09a-f5064463d6e8)# Anonymized Support code for Midpoint Essay for HIST08036: History of Edinburgh
+# Anonymized support code for Midpoint Essay for HIST08036: History of Edinburgh
 
 ## Visualizations (included in paper)
 
